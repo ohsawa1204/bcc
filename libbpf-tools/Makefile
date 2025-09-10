@@ -94,6 +94,7 @@ APPS = \
 	tcptop \
 	vfsstat \
 	wakeuptime \
+	aw_physmem \
 	$(BZ_APPS) \
 	#
 
