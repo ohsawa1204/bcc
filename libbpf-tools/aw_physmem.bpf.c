@@ -7,9 +7,17 @@
 
 //#define HOOK_SET_PTE_RANGE
 
-static char ros2_str[] = "/opt/ros/humble/bin/ros2";
-//static char ros2_str[] = "/home/takashiosawa/work/tools/bcc/libbpf-tools/test/hoge";
-static int ros2_str_len = sizeof(ros2_str) - 1;
+//#define USE_TEST_TARGET
+
+#ifdef USE_TEST_TARGET
+static char target_str[] = "/home/takashiosawa/work/tools/bcc/libbpf-tools/test/hoge";
+static char target_arg_str[] = "";
+#else
+static char target_str[] = "/opt/ros/humble/bin/ros2";
+static char target_arg_str[] = "launch";
+#endif
+static int  target_str_len = sizeof(target_str) - 1;
+static int  target_arg_str_len = sizeof(target_arg_str) - 1;
 
 const volatile bool ignore_failed = true;
 
@@ -79,11 +87,16 @@ int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter* ctx)
 		ret = bpf_probe_read_user_str(args, ARGSIZE, (const char*)ctx->args[0]);
 		if (ret < 0)
 			return 0;
-		if (strmatch(args, ros2_str, ros2_str_len)) {
-			ros2_launch_executed = true;
-			#ifdef ENABLE_TIMESTATMP
-			start_ts = bpf_ktime_get_ns();
-			#endif
+		if (strmatch(args, target_str, target_str_len)) {
+			ret = bpf_probe_read_user_str(args, ARGSIZE, (const char*)ctx->args[1]);
+			if (ret < 0)
+				return 0;
+			if (strmatch(args, target_arg_str, target_arg_str_len)) {
+				ros2_launch_executed = true;
+				#ifdef ENABLE_TIMESTATMP
+				start_ts = bpf_ktime_get_ns();
+				#endif
+			}
 		} else
 			return 0;
 	} else {

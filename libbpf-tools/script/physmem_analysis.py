@@ -21,10 +21,15 @@ process_tgid_dict = {}  # key: tgid, val: Process
 tgid_pid_dict = {}      # key: pid, val: tgid
 mapped_file_dict = {}   # key: file name, val: MappedFile
 
+total_autoware_pages = 0
+max_autoware_pages = 0
+all_time_max_autoware_pages = 0
+
 class MappedFile:
     def __init__(self, name):
-        self.name = name       # file name
-        self.offset_list = []  # list of offset to which an access has occurred
+        self.name = name                    # file name
+        self.offset_list = []               # list of offset to which an access has occurred
+        self.offset_no_reclaiming_list = [] # list in the absence of page reclaiming
 
 class Access:
     def __init__(self, addr, write):
@@ -33,8 +38,8 @@ class Access:
 
 @dataclasses.dataclass
 class NumPages:
-    anon: int
-    file: int
+    anon: int   # anonymous page
+    file: int   # file mapped page
 
 def is_file(name, perm, write):
     if (write == True and perm[3] == 's') or (write == False and name != "anon" and name != "[heap]" and name != "[stack]") or (perm[1] == '-' and name != "anon" and name != "[heap]" and name != "[stack]"):
@@ -55,6 +60,7 @@ class Vma:
         self.num_write_accessed_pages = 0
         self.num_read_accessed_pages = 0
         self.num_pages = NumPages(0, 0)
+        self.num_pages_no_reclaiming = NumPages(0, 0)
         self.num_reclaimed_pages = NumPages(0, 0)
         self.num_reclaimed_and_reaccessed_pages = NumPages(0, 0)
     def reset(self):
@@ -64,6 +70,7 @@ class Vma:
         self.num_write_accessed_pages = 0
         self.num_read_accessed_pages = 0
         self.num_pages = NumPages(0, 0)
+        self.num_pages_no_reclaiming = NumPages(0, 0)
         self.num_reclaimed_pages = NumPages(0, 0)
         self.num_reclaimed_and_reaccessed_pages = NumPages(0, 0)
     def hit(self, addr):
@@ -90,11 +97,28 @@ class Vma:
             self.num_pages.file = self.num_pages.file + 1
         else:
             self.num_pages.anon = self.num_pages.anon + 1
+    def addAccessNoReclaiming(self, access):
+        global mapped_file_dict
+        if is_file(self.file, self.perm, access.write):
+            if mapped_file_dict.get(self.file) == None:
+                mapped_file = MappedFile(self.file)
+                mapped_file_dict[self.file] = mapped_file
+            else:
+                mapped_file = mapped_file_dict[self.file]
+            offset = access.addr - self.file_mapped_start_addr
+            if not offset in mapped_file.offset_no_reclaiming_list:
+                mapped_file.offset_no_reclaiming_list.append(offset)
+            self.num_pages_no_reclaiming.file = self.num_pages_no_reclaiming.file + 1
+        else:
+            self.num_pages_no_reclaiming.anon = self.num_pages_no_reclaiming.anon + 1
     def addReclaimedAddr(self, addr, accesses_dict):
         self.reclaimed_list.append(addr)
-        access = accesses_dict[addr]
-        if is_file(self.file, self.perm, access.write):
-            self.num_reclaimed_pages.file = self.num_reclaimed_pages.file + 1
+        if accesses_dict.get(addr) != None:
+            access = accesses_dict[addr]
+            if is_file(self.file, self.perm, access.write):
+                self.num_reclaimed_pages.file = self.num_reclaimed_pages.file + 1
+            else:
+                self.num_reclaimed_pages.anon = self.num_reclaimed_pages.anon + 1
         else:
             self.num_reclaimed_pages.anon = self.num_reclaimed_pages.anon + 1
     def addReclaimedAndReaccessedAddr(self, addr, accesses_dict):
@@ -131,21 +155,27 @@ class Process:
         self.vmalist = []
         self.mapped_file_dict = {}
         self.accesses = {}
-        self.accesses_wo_reclaim = {}
-        self.non_mapped_accesses_list = []
+        self.accesses_no_reclaiming = {}
+        self.non_mapped_read_accesses_list = []
+        self.non_mapped_write_accesses_list = []
         self.reclaimed_addr_list = []
         self.reclaimed_and_reaccessed_addr_list = []
         self.num_write_accessed_pages = 0
         self.num_read_accessed_pages = 0
         self.num_pages = NumPages(0, 0)
+        self.num_pages_no_reclaiming = NumPages(0, 0)
         self.num_reclaimed_pages = NumPages(0, 0)
         self.num_reclaimed_and_reaccessed_pages = NumPages(0, 0)
+        self.total_pages = 0
+        self.max_pages = 0
+        self.all_time_max_pages = 0
     def reset(self):
         for vma in self.vmalist:
             vma.reset()
         self.num_write_accessed_pages = 0
         self.num_read_accessed_pages = 0
         self.num_pages = NumPages(0, 0)
+        self.num_pages_no_reclaiming = NumPages(0, 0)
         self.num_reclaimed_pages = NumPages(0, 0)
         self.num_reclaimed_and_reaccessed_pages = NumPages(0, 0)
     def setName(self, name, node, ns):
@@ -157,35 +187,53 @@ class Process:
     def addPid(self, pid):
         self.pidlist.append(pid)
     def handle_page_fault(self, addr, flag):
+        global total_autoware_pages, max_autoware_pages, all_time_max_autoware_pages
         addr = addr & ~(0x1000 - 1)
         if flag & 0x1 or flag & 0x2:
             write = True
         else:
             write = False
-        if self.accesses_wo_reclaim.get(addr) == None:
+        if self.accesses_no_reclaiming.get(addr) == None:
             access = Access(addr, write)
-            self.accesses_wo_reclaim[addr] = access
+            self.accesses_no_reclaiming[addr] = access
         else:
-            access = self.accesses_wo_reclaim[addr]
+            access = self.accesses_no_reclaiming[addr]
             if write == True:
                 access.write = True
         if self.accesses.get(addr) == None:
             self.accesses[addr] = access
         if addr in self.reclaimed_addr_list:
             self.reclaimed_and_reaccessed_addr_list.append(addr)
+
+        self.total_pages = self.total_pages + 1
+        if self.total_pages > self.max_pages:
+            self.max_pages = self.total_pages
+        if self.total_pages > self.all_time_max_pages:
+            self.all_time_max_pages = self.total_pages
+        total_autoware_pages = total_autoware_pages + 1
+        if total_autoware_pages > max_autoware_pages:
+            max_autoware_pages = total_autoware_pages
+        if total_autoware_pages > all_time_max_autoware_pages:
+            all_time_max_autoware_pages = total_autoware_pages
     def handle_munmap(self, start, end):
+        global total_autoware_pages
         accesses_copy = self.accesses.copy()
         for addr in accesses_copy.keys():
             if addr >= start and addr < end:
                 del self.accesses[addr]
-        accesses_wo_reclaim_copy = self.accesses_wo_reclaim.copy()
-        for addr in accesses_wo_reclaim_copy.keys():
+                self.total_pages = self.total_pages - 1
+                total_autoware_pages = total_autoware_pages - 1
+        accesses_no_reclaiming_copy = self.accesses_no_reclaiming.copy()
+        for addr in accesses_no_reclaiming_copy.keys():
             if addr >= start and addr < end:
-                del self.accesses_wo_reclaim[addr]
+                del self.accesses_no_reclaiming[addr]
     def handle_page_reclaim(self, addr):
+        global total_autoware_pages
         if self.accesses.get(addr):
             del self.accesses[addr]
-            self.reclaimed_addr_list.append(addr)
+            self.total_pages = self.total_pages - 1
+            total_autoware_pages = total_autoware_pages - 1
+        self.reclaimed_addr_list.append(addr)
     def post_process(self):
         self.reset()
         for addr in self.accesses.keys():
@@ -198,23 +246,41 @@ class Process:
                     break
             if hit == False:
                 access = self.accesses[addr]
-                self.non_mapped_accesses_list.append(access)
+                if access.write == True:
+                    self.non_mapped_write_accesses_list.append(access)
+                else:
+                    self.non_mapped_read_accesses_list.append(access)
+        for addr in self.accesses_no_reclaiming.keys():
+            hit = False
+            for vma in self.vmalist:
+                if vma.hit(addr) == True:
+                    access = self.accesses_no_reclaiming[addr]
+                    vma.addAccessNoReclaiming(access)
+                    hit = True
+                    break
         for addr in self.reclaimed_addr_list:
             for vma in self.vmalist:
                 if vma.hit(addr) == True:
-                    vma.addReclaimedAddr(addr, self.accesses_wo_reclaim)
+                    vma.addReclaimedAddr(addr, self.accesses_no_reclaiming)
                     break
         for addr in self.reclaimed_and_reaccessed_addr_list:
             for vma in self.vmalist:
                 if vma.hit(addr) == True:
-                    vma.addReclaimedAndReaccessedAddr(addr, self.accesses_wo_reclaim)
+                    vma.addReclaimedAndReaccessedAddr(addr, self.accesses_no_reclaiming)
                     break
+
+        self.num_write_accessed_pages = len(self.non_mapped_write_accesses_list)
+        self.num_read_accessed_pages = len(self.non_mapped_read_accesses_list)
+        self.num_pages.anon = len(self.non_mapped_write_accesses_list) + len(self.non_mapped_read_accesses_list)
+        self.num_pages_no_reclaiming.anon = len(self.non_mapped_write_accesses_list) + len(self.non_mapped_read_accesses_list)
         for vma in self.vmalist:
             vma.sortAccess()
             self.num_write_accessed_pages = self.num_write_accessed_pages + vma.num_write_accessed_pages
             self.num_read_accessed_pages = self.num_read_accessed_pages + vma.num_read_accessed_pages
             self.num_pages.anon = self.num_pages.anon + vma.num_pages.anon
             self.num_pages.file = self.num_pages.file + vma.num_pages.file
+            self.num_pages_no_reclaiming.anon = self.num_pages_no_reclaiming.anon + vma.num_pages_no_reclaiming.anon
+            self.num_pages_no_reclaiming.file = self.num_pages_no_reclaiming.file + vma.num_pages_no_reclaiming.file
             self.num_reclaimed_pages.anon = self.num_reclaimed_pages.anon + vma.num_reclaimed_pages.anon
             self.num_reclaimed_pages.file = self.num_reclaimed_pages.file + vma.num_reclaimed_pages.file
             self.num_reclaimed_and_reaccessed_pages.anon = self.num_reclaimed_and_reaccessed_pages.anon + vma.num_reclaimed_and_reaccessed_pages.anon
@@ -223,18 +289,26 @@ class Process:
     def print(self):
         #print("tgid = ", self.tgid)
         print("process =", self.name, self.node, self.ns)
-        print(" Rss:", self.rss)
-        print(" Pss:", self.pss)
-        print(" Pss_Anon:", self.num_pss_pages.anon)
-        print(" Pss_File:", self.num_pss_pages.file)
+        print(" pid =", self.tgid)
+        #print(" Rss:", self.rss)
+        #print(" Pss:", self.pss)
+        print(" Pss Anon kB:", self.num_pages.anon * 4)
+        print(" Pss File kB:", self.num_pages.file * 4)
+        print(" Pss + Reclaimed Anon kB:", self.num_pages_no_reclaiming.anon * 4)
+        print(" Pss + Reclaimed File kB:", self.num_pages_no_reclaiming.file * 4)
+        print(" Rss Max kB:", self.max_pages * 4)
+        print(" Rss Max kB (All Time):", self.all_time_max_pages * 4)
+        print(" (Rss total kB:", self.total_pages * 4, ")")
         print(" reclaimed_kb:", len(self.reclaimed_addr_list) * 4)
         print("  anon_reclaimed kB:", self.num_reclaimed_pages.anon * 4)
         print("  file_reclaimed kB:", self.num_reclaimed_pages.file * 4)
         print("  anon_reclaimed_and_reaccessed kB:", self.num_reclaimed_and_reaccessed_pages.anon * 4)
         print("  file_reclaimed_and_reaccessed kB:", self.num_reclaimed_and_reaccessed_pages.file * 4)
         print(" R:", self.num_read_accessed_pages * 4, "kB W:", self.num_write_accessed_pages * 4, "kB")
+        '''
         for vma in self.vmalist:
             vma.print()
+        '''
 
 def parse_map_file(map_file):
     f = open(map_file, 'r')
@@ -393,14 +467,18 @@ def show(marker_idx):
     for p in process_tgid_dict.values():
         p.post_process()
     total_anon_pages = 0
+    total_anon_pages_no_reclaiming = 0
     total_reclaimed_pages = NumPages(0, 0)
     total_reclaimed_and_reaccessed_pages = NumPages(0, 0)
+    total_pss_no_reclaiming = 0
     print("PER PROCESS REPORT")
     for i, p in enumerate(process_tgid_dict.values()):
         print("PROCESS", i)
         p.print()
         print("")
+        p.max_pages = p.total_pages
         total_anon_pages = total_anon_pages + p.num_pages.anon
+        total_anon_pages_no_reclaiming = total_anon_pages_no_reclaiming + p.num_pages_no_reclaiming.anon
         total_reclaimed_pages.anon = total_reclaimed_pages.anon + p.num_reclaimed_pages.anon
         total_reclaimed_pages.file = total_reclaimed_pages.file + p.num_reclaimed_pages.file
         total_reclaimed_and_reaccessed_pages.anon = total_reclaimed_and_reaccessed_pages.anon + p.num_reclaimed_and_reaccessed_pages.anon
@@ -410,9 +488,18 @@ def show(marker_idx):
     for mf in mapped_file_dict.values():
         total_cached_pages = total_cached_pages + len(mf.offset_list)
 
+    total_cached_pages_no_reclaiming = 0
+    for mf in mapped_file_dict.values():
+        total_cached_pages_no_reclaiming = total_cached_pages_no_reclaiming + len(mf.offset_no_reclaiming_list)
+
     print("AUTOWARE WIDE REPORT")
     print("total_anon =", total_anon_pages * 4, "kB")
     print("total_cached =", total_cached_pages * 4 , "kB")
+    print("total_anon_no_reclaiming =", total_anon_pages_no_reclaiming * 4, "kB")
+    print("total_cached_no_reclaiming =", total_cached_pages_no_reclaiming * 4 , "kB")
+    print("max =", max_autoware_pages * 4, "kB")
+    print("max (all time) =", all_time_max_autoware_pages * 4, "kB")
+    #print("(total =", total_autoware_pages * 4, "kB)")
     print("total_reclaimed =", (total_reclaimed_pages.anon + total_reclaimed_pages.file) * 4, "kB")
     print(" total_reclaimed_anon =", total_reclaimed_pages.anon * 4, "kB")
     print(" total_reclaimed_file =", total_reclaimed_pages.file * 4, "kB")

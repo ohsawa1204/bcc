@@ -1,3 +1,4 @@
 #!/bin/bash
 
-sudo kill -USR1 `ps aux|grep aw_physmem | grep -v sudo | grep -v grep | awk '{print $2}'`
+script_name=$(basename $0)
+sudo kill -USR1 `ps aux|grep aw_physmem | grep -v sudo | grep -v grep | grep -v ${script_name} | awk '{print $2}'`
