@@ -20,6 +20,7 @@ class PhysmemData:
     reclaimed_and_reaccessed: int
 
 physmem_data_list = []
+wastmem_data_list = []
 
 def get_item(data, index):
     items = data.split()
@@ -51,6 +52,14 @@ def retrieve_from_result_file(result_file):
                     physmem_data.reclaimed_and_reaccessed = physmem_data.reclaimed_and_reaccessed + int(get_item(data, 2))
                     physmem_data_list.append(physmem_data)
                     do_retrieve = False
+
+def retrieve_from_wastmem_file(wastmem_file):
+    with open(wastmem_file, 'r') as f:
+        datalist = f.readlines()
+        for data in datalist:
+            if re.search("total size", data):
+                size = int(get_item(data, 3))
+                wastmem_data_list.append(size * 1024)
 
 def simple_physmem(maps_file):
     total_pss = 0
@@ -100,7 +109,7 @@ def get_cpu_top(top_file):
                 return us, si
 
 def retrieve(dir):
-    print("datetime, total_pss,total_anon,total_file,total_pss_plus_reclaimed,reclaimed,reaccessed,used,free,swap_free,buff_cache,available,cpu_usage")
+    print("datetime, total_pss,total_anon,total_file,total_pss_plus_reclaimed,wastmem,autoware+wastmem,reclaimed,reaccessed,used,free,swap_free,buff_cache,available,cpu_usage")
     files = glob.glob(dir + "/*")
     files.sort()
     for file in files:
@@ -108,15 +117,18 @@ def retrieve(dir):
             file = os.path.basename(file)
             if re.search('^result_\d+_\d+\.txt', file):
                 retrieve_from_result_file(file)
+            elif re.search('^wastmem_\d+_\d+\.txt', file):
+                retrieve_from_wastmem_file(file)
 
     idx = 0
     for file in files:
         if os.path.isfile(file):
             file = os.path.basename(file)
-            if re.search('^maps_\d+_\d+\.txt', file):
+            if re.search('^maps_\d+_\d+_\d+\.txt', file):
                 total_pss, total_pss_anon, total_pss_file = simple_physmem(file)
-                date_time = os.path.basename(file)[5:-4]
-                free_file = 'free_' + date_time + '.txt'
+                date_time = os.path.basename(file)[9:-4]
+                idx_date_time = os.path.basename(file)[5:-4]
+                free_file = 'free_' + idx_date_time + '.txt'
                 used, free, swap_free, buff_cache, available = get_free_info(free_file)
                 #print(used, free, swap_free, buff_cache, available)
                 '''
@@ -126,10 +138,12 @@ def retrieve(dir):
                 maps_cached_size = get_cached_pages(fincore_maps_file)
                 '''
                 #print(rosbag_cached_size, maps_cached_size)
-                top_file = 'top_' + date_time + '.txt'
+                top_file = 'top_' + idx_date_time + '.txt'
                 us, si = get_cpu_top(top_file)
                 print(date_time, total_pss, total_pss_anon, total_pss_file,
                       physmem_data_list[idx].pss_no_reclaiming,
+                      wastmem_data_list[idx],
+                      physmem_data_list[idx].pss_no_reclaiming + wastmem_data_list[idx],
                       physmem_data_list[idx].reclaimed,
                       physmem_data_list[idx].reclaimed_and_reaccessed,
                       used,  free, swap_free, buff_cache, available, us + si, sep=',')

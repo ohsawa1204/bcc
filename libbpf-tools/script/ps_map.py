@@ -59,6 +59,5 @@ if __name__ == "__main__":
     date_time = os.path.basename(ps_file)[7:-4]
 
     extracted_pids = extract_pids(datalist)
-    print(extracted_pids)
     out_file = "maps_" + date_time + ".txt"
     write_maps(extracted_pids, out_file)

@@ -123,9 +123,12 @@ class Vma:
             self.num_reclaimed_pages.anon = self.num_reclaimed_pages.anon + 1
     def addReclaimedAndReaccessedAddr(self, addr, accesses_dict):
         self.reclaimed_and_reaccessed_list.append(addr)
-        access = accesses_dict[addr]
-        if is_file(self.file, self.perm, access.write):
-            self.num_reclaimed_and_reaccessed_pages.file = self.num_reclaimed_and_reaccessed_pages.file + 1
+        if accesses_dict.get(addr) != None:
+            access = accesses_dict[addr]
+            if is_file(self.file, self.perm, access.write):
+                self.num_reclaimed_and_reaccessed_pages.file = self.num_reclaimed_and_reaccessed_pages.file + 1
+            else:
+                self.num_reclaimed_and_reaccessed_pages.anon = self.num_reclaimed_and_reaccessed_pages.anon + 1
         else:
             self.num_reclaimed_and_reaccessed_pages.anon = self.num_reclaimed_and_reaccessed_pages.anon + 1
     def sortAccess(self):
@@ -403,7 +406,7 @@ def parse_page_fault_file_bin(page_fault_file, till_num_marks):
                 addr2 = int.from_bytes(data[24:32], byteorder = "little")
                 if flag & END:
                     print("END found")
-                    show('END')
+                    #show('END')
                     return
                 elif flag & MARKER:
                     marker_cnt = marker_cnt + 1
