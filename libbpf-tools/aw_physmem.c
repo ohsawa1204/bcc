@@ -153,9 +153,19 @@ static void insert_marker_bin(void)
 }
 #endif /* GEN_RAW_BINARY */
 
+static void get_time(char *str)
+{
+	struct tm *tm;
+	time_t now = time(NULL);
+
+	tm = localtime(&now);
+	sprintf(str, "%04d%02d%02d_%02d%02d%02d", tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
+}
+
 static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz)
 {
 	const struct event *e = data;
+	char strtime[256];
 
 	#ifdef GEN_RAW_BINARY
 	if (insert_marker)
@@ -170,12 +180,16 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz)
 	if (e->pte_event.flags & FIRST_UNMAP_FLAG && !unmap_cnt) {
 		unmap_cnt++;
 		//insert_marker_bin();
-		printf("first unmap\n");
+		get_time(strtime);
+		printf("first unmap @ %s\n", strtime);
+		fflush(stdout);
 	}
 	if (e->pte_event.flags & UNMAP_FLAG && !autoware_unmap_cnt) {
 		autoware_unmap_cnt++;
 		//insert_marker_bin();
-		printf("autoware first unmap\n");
+		get_time(strtime);
+		printf("autoware first unmap @ %s\n", strtime);
+		fflush(stdout);
 	}
 	#endif
 
@@ -226,7 +240,6 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz)
 	#endif
 
 	#endif /* !GEN_RAW_BINARY */
-
 
 	fflush(stdout);
 }
@@ -281,9 +294,9 @@ int main(int argc, char **argv)
 		goto cleanup;
 	}
 	if (posix_memalign((void *)&e_buffer, ALIGNMENT, ALIGNMENT) != 0) {
-        perror("posix_memalign failed");
-        goto cleanup;
-    }
+		perror("posix_memalign failed");
+		goto cleanup;
+	}
 	#endif
 
 	/* setup event callbacks */

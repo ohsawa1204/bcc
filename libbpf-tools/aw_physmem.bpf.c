@@ -5,8 +5,6 @@
 #include <bpf/bpf_core_read.h>
 #include "aw_physmem.h"
 
-//#define HOOK_SET_PTE_RANGE
-
 //#define USE_TEST_TARGET
 
 #ifdef USE_TEST_TARGET
@@ -266,128 +264,8 @@ int BPF_KRETPROBE(handle_mm_fault_exit, long ret) {
 
 #else /* !HOOK_HANDLE_MM_FAULT */
 
-#ifdef HOOK_SET_PTE_RANGE
-SEC("kprobe/set_pte_range")
-int BPF_KPROBE(set_pte_range_entry, struct vm_fault *vmf, struct folio *folio, struct page *page, unsigned int nr, unsigned long addr) {
-	u64 id;
-	pid_t pid, tgid, ppid;
-	struct event *event;
-	struct task_struct *task;
-
-	id = bpf_get_current_pid_tgid();
-	tgid = id >> 32;
-	pid = (pid_t)id;
-	if (!bpf_map_lookup_elem(&target_processes, &tgid)) {
-		task = (struct task_struct *)bpf_get_current_task();
-		ppid = (pid_t)BPF_CORE_READ(task, real_parent, tgid);
-		if (!bpf_map_lookup_elem(&target_processes, &ppid))
-			return 0;
-	}
-
-	event = bpf_map_lookup_elem(&target_processes, &pid);
-	if (!event) {
-		if (bpf_map_update_elem(&target_processes, &pid, &empty_event, BPF_NOEXIST))
-			return 0;
-		event = bpf_map_lookup_elem(&target_processes, &pid);
-		if (!event)
-			return 0;
-		event->pid = pid;
-	}
-
-	event->pte_event.flags = BPF_CORE_READ(vmf, flags);
-	#if 0
-	if (event->pte_event.flags & (FAULT_FLAG_WRITE | FAULT_FLAG_MKWRITE))
-		return 0;
-	#endif
-	event->pte_event.vaddr = addr;
-	event->pte_event.vaddr2 = 0;
-
-	#ifdef VMRSS_DEBUG
-	task = (struct task_struct *)bpf_get_current_task();
-	struct mm_rss_stat mm_rss_stat = BPF_CORE_READ(task, mm, rss_stat);
-	event->pte_event.count[0] = *(__u64 *)&mm_rss_stat.count[0];
-	event->pte_event.count[1] = *(__u64 *)&mm_rss_stat.count[1];
-	struct task_rss_stat task_rss_stat = BPF_CORE_READ(task, rss_stat);
-	event->pte_event.count[2] = task_rss_stat.count[0];
-	event->pte_event.count[3] = task_rss_stat.count[1];
-	#endif
-
-	#ifdef ENABLE_CALLSTACK
-	__u32 kern_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
-	event->pte_event.stack_id = kern_stack_id;
-	#endif
-
-	#ifdef ENABLE_TIMESTATMP
-	event->pte_event.ts = bpf_ktime_get_ns() - start_ts;
-	#endif
-
-	bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, event, sizeof(*event));
-
-	return 0;
-}
-#else /* !HOOK_SET_PTE_RANGE */
-SEC("kprobe/do_set_pte")
-int BPF_KPROBE(do_set_pte_entry, struct vm_fault *vmf, struct page *page, unsigned long addr) {
-	u64 id;
-	pid_t pid, tgid, ppid;
-	struct event *event;
-	struct task_struct *task;
-
-	id = bpf_get_current_pid_tgid();
-	tgid = id >> 32;
-	pid = (pid_t)id;
-	if (!bpf_map_lookup_elem(&target_processes, &tgid)) {
-		task = (struct task_struct *)bpf_get_current_task();
-		ppid = (pid_t)BPF_CORE_READ(task, real_parent, tgid);
-		if (!bpf_map_lookup_elem(&target_processes, &ppid))
-			return 0;
-	}
-
-	event = bpf_map_lookup_elem(&target_processes, &pid);
-	if (!event) {
-		if (bpf_map_update_elem(&target_processes, &pid, &empty_event, BPF_NOEXIST))
-			return 0;
-		event = bpf_map_lookup_elem(&target_processes, &pid);
-		if (!event)
-			return 0;
-		event->pid = pid;
-	}
-
-	event->pte_event.flags = BPF_CORE_READ(vmf, flags);
-	#if 0
-	if (event->pte_event.flags & (FAULT_FLAG_WRITE | FAULT_FLAG_MKWRITE))
-		return 0;
-	#endif
-	event->pte_event.vaddr = addr;
-	event->pte_event.vaddr2 = 0;
-
-	#ifdef VMRSS_DEBUG
-	task = (struct task_struct *)bpf_get_current_task();
-	struct mm_rss_stat mm_rss_stat = BPF_CORE_READ(task, mm, rss_stat);
-	event->pte_event.count[0] = *(__u64 *)&mm_rss_stat.count[0];
-	event->pte_event.count[1] = *(__u64 *)&mm_rss_stat.count[1];
-	struct task_rss_stat task_rss_stat = BPF_CORE_READ(task, rss_stat);
-	event->pte_event.count[2] = task_rss_stat.count[0];
-	event->pte_event.count[3] = task_rss_stat.count[1];
-	#endif
-
-	#ifdef ENABLE_CALLSTACK
-	__u32 kern_stack_id = bpf_get_stackid(ctx, &stack_traces, 0);
-	event->pte_event.stack_id = kern_stack_id;
-	#endif
-
-	#ifdef ENABLE_TIMESTATMP
-	event->pte_event.ts = bpf_ktime_get_ns() - start_ts;
-	#endif
-
-	bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, event, sizeof(*event));
-
-	return 0;
-}
-#endif /* !HOOK_SET_PTE_RANGE */
-
-SEC("kprobe/do_anonymous_page")
-int BPF_KPROBE(do_anonymous_page_entry, struct vm_fault *vmf) {
+static int __common_page_fault_entry(struct vm_fault *vmf, struct pt_regs *ctx)
+{
 	u64 id;
 	pid_t pid, tgid, ppid;
 	struct event *event;
@@ -438,6 +316,31 @@ int BPF_KPROBE(do_anonymous_page_entry, struct vm_fault *vmf) {
 	bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, event, sizeof(*event));
 
 	return 0;
+}
+
+SEC("kprobe/do_anonymous_page")
+int BPF_KPROBE(do_anonymous_page_entry, struct vm_fault *vmf) {
+    return __common_page_fault_entry(vmf, ctx);
+}
+
+SEC("kprobe/do_fault")
+int BPF_KPROBE(do_fault_entry, struct vm_fault *vmf) {
+    return __common_page_fault_entry(vmf, ctx);
+}
+
+SEC("kprobe/do_swap_page")
+int BPF_KPROBE(do_swap_page_entry, struct vm_fault *vmf) {
+    return __common_page_fault_entry(vmf, ctx);
+}
+
+SEC("kprobe/do_numa_page")
+int BPF_KPROBE(do_numa_page_entry, struct vm_fault *vmf) {
+    return __common_page_fault_entry(vmf, ctx);
+}
+
+SEC("kprobe/do_wp_page")
+int BPF_KPROBE(do_wp_page_entry, struct vm_fault *vmf) {
+    return __common_page_fault_entry(vmf, ctx);
 }
 
 #endif /* !HOOK_HANDLE_MM_FAULT */
