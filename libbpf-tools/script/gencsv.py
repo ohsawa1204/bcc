@@ -109,7 +109,6 @@ def get_cpu_top(top_file):
                 return us, si
 
 def retrieve(dir):
-    print("datetime, total_pss,total_anon,total_file,total_pss_plus_reclaimed,wastmem,autoware+wastmem,reclaimed,reaccessed,used,free,swap_free,buff_cache,available,cpu_usage")
     files = glob.glob(dir + "/*")
     files.sort()
     for file in files:
@@ -120,6 +119,11 @@ def retrieve(dir):
             elif re.search('^wastmem_\d+_\d+\.txt', file):
                 retrieve_from_wastmem_file(file)
 
+    if len(wastmem_data_list) > 0:
+        print("datetime, total_pss,total_anon,total_file,total_pss_plus_reclaimed,wastmem,autoware+wastmem,reclaimed,reaccessed,used,free,swap_free,buff_cache,available,cpu_usage")
+    else:
+        print("datetime, total_pss,total_anon,total_file,total_pss_plus_reclaimed,reclaimed,reaccessed,used,free,swap_free,buff_cache,available,cpu_usage")
+
     idx = 0
     for file in files:
         if os.path.isfile(file):
@@ -129,6 +133,8 @@ def retrieve(dir):
                 date_time = os.path.basename(file)[9:-4]
                 idx_date_time = os.path.basename(file)[5:-4]
                 free_file = 'free_' + idx_date_time + '.txt'
+                if not os.path.isfile(free_file):
+                    return
                 used, free, swap_free, buff_cache, available = get_free_info(free_file)
                 #print(used, free, swap_free, buff_cache, available)
                 '''
@@ -140,13 +146,20 @@ def retrieve(dir):
                 #print(rosbag_cached_size, maps_cached_size)
                 top_file = 'top_' + idx_date_time + '.txt'
                 us, si = get_cpu_top(top_file)
-                print(date_time, total_pss, total_pss_anon, total_pss_file,
-                      physmem_data_list[idx].pss_no_reclaiming,
-                      wastmem_data_list[idx],
-                      physmem_data_list[idx].pss_no_reclaiming + wastmem_data_list[idx],
-                      physmem_data_list[idx].reclaimed,
-                      physmem_data_list[idx].reclaimed_and_reaccessed,
-                      used,  free, swap_free, buff_cache, available, us + si, sep=',')
+                if len(wastmem_data_list) > 0:
+                    print(date_time, total_pss, total_pss_anon, total_pss_file,
+                          physmem_data_list[idx].pss_no_reclaiming,
+                          wastmem_data_list[idx],
+                          physmem_data_list[idx].pss_no_reclaiming + wastmem_data_list[idx],
+                          physmem_data_list[idx].reclaimed,
+                          physmem_data_list[idx].reclaimed_and_reaccessed,
+                          used,  free, swap_free, buff_cache, available, us + si, sep=',')
+                else:
+                    print(date_time, total_pss, total_pss_anon, total_pss_file,
+                          physmem_data_list[idx].pss_no_reclaiming,
+                          physmem_data_list[idx].reclaimed,
+                          physmem_data_list[idx].reclaimed_and_reaccessed,
+                          used,  free, swap_free, buff_cache, available, us + si, sep=',')
                 idx = idx + 1
 
 if __name__ == "__main__":

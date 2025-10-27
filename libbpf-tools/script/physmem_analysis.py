@@ -175,6 +175,8 @@ class Process:
     def reset(self):
         for vma in self.vmalist:
             vma.reset()
+        self.non_mapped_read_accesses_list = []
+        self.non_mapped_write_accesses_list = []
         self.num_write_accessed_pages = 0
         self.num_read_accessed_pages = 0
         self.num_pages = NumPages(0, 0)
