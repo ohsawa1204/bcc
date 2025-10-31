@@ -402,8 +402,8 @@ def parse_page_fault_file_bin(page_fault_file, till_num_marks):
                 break
             for i in range(int(4096/32)):
                 data = pagedata[i*32:(i+1)*32]
-                pid = int.from_bytes(data[0:8], byteorder = "little")
-                flag = int.from_bytes(data[8:16], byteorder = "little")
+                pid = int.from_bytes(data[0:4], byteorder = "little")
+                flag = int.from_bytes(data[8:12], byteorder = "little")
                 addr = int.from_bytes(data[16:24], byteorder = "little")
                 addr2 = int.from_bytes(data[24:32], byteorder = "little")
                 if flag & END:
