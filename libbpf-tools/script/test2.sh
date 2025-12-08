@@ -1,6 +1,6 @@
 #!/bin/bash
 
-INIT_ALLOC_NUM=60
+INIT_ALLOC_NUM=0
 INTERVAL=10
 SUDO_PASSWD=autoware
 
