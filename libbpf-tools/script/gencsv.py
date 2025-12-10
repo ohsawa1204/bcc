@@ -15,9 +15,9 @@ import dataclasses
 class PhysmemData:
     anon: int
     file: int
-    pss_no_reclaiming: int
+    pss_plus_reclamations: int
     reclaimed: int
-    reclaimed_and_reaccessed: int
+    reaccessed: int
 
 physmem_data_list = []
 wastmem_data_list = []
@@ -38,18 +38,18 @@ def retrieve_from_result_file(result_file):
             if do_retrieve:
                 if re.search("total_anon = ", data):
                     physmem_data.anon = int(get_item(data, 2))
-                elif re.search("total_cached = ", data):
+                elif re.search("total_file = ", data):
                     physmem_data.file = int(get_item(data, 2))
-                elif re.search("total_anon_no_reclaiming = ", data):
-                    physmem_data.pss_no_reclaiming = int(get_item(data, 2))
-                elif re.search("total_cached_no_reclaiming = ", data):
-                    physmem_data.pss_no_reclaiming = physmem_data.pss_no_reclaiming + int(get_item(data, 2))
+                elif re.search("total_anon_plus_reclamations = ", data):
+                    physmem_data.pss_plus_reclamations = int(get_item(data, 2))
+                elif re.search("total_file_plus_reclamations = ", data):
+                    physmem_data.pss_plus_reclamations = physmem_data.pss_plus_reclamations + int(get_item(data, 2))
                 elif re.search("total_reclaimed = ", data):
                     physmem_data.reclaimed = int(get_item(data, 2))
-                elif re.search("total_reclaimed_and_reaccessed_anon = ", data):
-                    physmem_data.reclaimed_and_reaccessed = int(get_item(data, 2))
-                elif re.search("total_reclaimed_and_reaccessed_file = ", data):
-                    physmem_data.reclaimed_and_reaccessed = physmem_data.reclaimed_and_reaccessed + int(get_item(data, 2))
+                elif re.search("total_reaccessed_anon = ", data):
+                    physmem_data.reaccessed = int(get_item(data, 2))
+                elif re.search("total_reaccessed_file = ", data):
+                    physmem_data.reaccessed = physmem_data.reaccessed + int(get_item(data, 2))
                     physmem_data_list.append(physmem_data)
                     do_retrieve = False
 
@@ -148,17 +148,17 @@ def retrieve(dir):
                 us, si = get_cpu_top(top_file)
                 if len(wastmem_data_list) > 0:
                     print(date_time, total_pss, total_pss_anon, total_pss_file,
-                          physmem_data_list[idx].pss_no_reclaiming,
+                          physmem_data_list[idx].pss_plus_reclamations,
                           wastmem_data_list[idx],
-                          physmem_data_list[idx].pss_no_reclaiming + wastmem_data_list[idx],
+                          physmem_data_list[idx].pss_plus_reclamations + wastmem_data_list[idx],
                           physmem_data_list[idx].reclaimed,
-                          physmem_data_list[idx].reclaimed_and_reaccessed,
+                          physmem_data_list[idx].reaccessed,
                           used,  free, swap_free, buff_cache, available, us + si, sep=',')
                 else:
                     print(date_time, total_pss, total_pss_anon, total_pss_file,
-                          physmem_data_list[idx].pss_no_reclaiming,
+                          physmem_data_list[idx].pss_plus_reclamations,
                           physmem_data_list[idx].reclaimed,
-                          physmem_data_list[idx].reclaimed_and_reaccessed,
+                          physmem_data_list[idx].reaccessed,
                           used,  free, swap_free, buff_cache, available, us + si, sep=',')
                 idx = idx + 1
 
